@@ -19,6 +19,7 @@ import threading
 import subprocess as sp
 import numpy as np
 import sys
+import time
 # --- Threaded RTSP Video Capture ---
 # This class uses ffmpeg to capture frames from an RTSP stream, which can be
 # more robust than OpenCV's VideoCapture for certain stream types.
@@ -177,40 +178,49 @@ if __name__ == "__main__":
     # --- Main Processing Loop ---
     generated_text = "Initializing..."
     last_printed_text = ""
+    last_inference_time = 0
+    inference_interval = 2  # seconds
 
     while not video_stream_widget.stopped:
         try:
             frame = video_stream_widget.read()
             if frame is not None:
-                # 1. Pre-process the Frame for the Model
-                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                pil_image = Image.fromarray(rgb_frame)
+                current_time = time.time()
 
-                # 2. Process image for LLaVA
-                image_tensor = process_images([pil_image], image_processor, model.config)[0]
-                # commented by ph - image_tensor = image_tensor.to(model.device, dtype=torch.float16)
+                # Perform inference every `inference_interval` seconds
+                if current_time - last_inference_time > inference_interval:
+                    last_inference_time = current_time
 
-                # 3. Run inference
-                with torch.inference_mode():
-                    output_ids = model.generate(
-                        input_ids,
-                        images=image_tensor.unsqueeze(0).half(),
-                        image_sizes=[pil_image.size],
-                        do_sample=True if args.temperature > 0 else False,
-                        temperature=args.temperature,
-                        top_p=args.top_p,
-                        num_beams=args.num_beams,
-                        pad_token_id=tokenizer.pad_token_id,
-                        max_new_tokens=256,
-                        use_cache=True)
+                    # 1. Pre-process the Frame for the Model
+                    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    pil_image = Image.fromarray(rgb_frame)
 
-                    outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
-                    generated_text = outputs
+                    # 2. Process image for LLaVA
+                    image_tensor = process_images([pil_image], image_processor, model.config)[0]
+                    # commented by ph - image_tensor = image_tensor.to(model.device, dtype=torch.float16)
 
-                # 4. Print description to console and display video frame
-                if generated_text and generated_text != last_printed_text:
-                    print(generated_text)
-                    last_printed_text = generated_text
+                    # 3. Run inference
+                    with torch.inference_mode():
+                        output_ids = model.generate(
+                            input_ids,
+                            images=image_tensor.unsqueeze(0).half(),
+                            image_sizes=[pil_image.size],
+                            do_sample=True if args.temperature > 0 else False,
+                            temperature=args.temperature,
+                            top_p=args.top_p,
+                            num_beams=args.num_beams,
+                            pad_token_id=tokenizer.pad_token_id,
+                            max_new_tokens=256,
+                            use_cache=True)
+
+                        outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
+                        generated_text = outputs
+
+                    # 4. Print description to console if it has changed
+                    if generated_text and generated_text != last_printed_text:
+                        timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+                        print(f"[{timestamp}] {generated_text}\n")
+                        last_printed_text = generated_text
 
                 # Display the raw frame without text overlay
                 cv2.imshow("RTSP Stream with LLaVA", frame)
