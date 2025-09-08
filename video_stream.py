@@ -19,6 +19,7 @@ import threading
 import subprocess as sp
 import numpy as np
 import sys
+import queue
 import time
 # --- Threaded RTSP Video Capture ---
 # This class uses ffmpeg to capture frames from an RTSP stream, which can be
@@ -136,6 +137,47 @@ class RTSPCameraStream:
             self.thread.join(timeout=5) # Wait up to 5 seconds for the thread to finish
 
 
+def inference_worker(q, model, tokenizer, image_processor, input_ids, args):
+    """A worker thread that runs model inference on frames from a queue."""
+    last_printed_text = ""
+    while True:
+        frame = q.get()
+        if frame is None:  # Sentinel to stop the thread
+            break
+
+        # 1. Pre-process the Frame for the Model
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        pil_image = Image.fromarray(rgb_frame)
+
+        # 2. Process image for the model
+        image_tensor = process_images([pil_image], image_processor, model.config)[0]
+
+        # 3. Run inference
+        with torch.inference_mode():
+            output_ids = model.generate(
+                input_ids,
+                images=image_tensor.unsqueeze(0).half(),
+                image_sizes=[pil_image.size],
+                do_sample=True if args.temperature > 0 else False,
+                temperature=args.temperature,
+                top_p=args.top_p,
+                num_beams=args.num_beams,
+                pad_token_id=tokenizer.pad_token_id,
+                max_new_tokens=256,
+                use_cache=True)
+
+            outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
+            generated_text = outputs
+
+        # 4. Print description to console if it has changed
+        if generated_text and generated_text != last_printed_text:
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+            print(f"[{timestamp}] {generated_text}\n")
+            last_printed_text = generated_text
+
+        q.task_done()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-path", type=str, default="./llava-v1.5-13b")
@@ -175,52 +217,27 @@ if __name__ == "__main__":
     
     input_ids = tokenizer_image_token(prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors='pt').unsqueeze(0).to(torch.device("mps"))
 
-    # --- Main Processing Loop ---
-    generated_text = "Initializing..."
-    last_printed_text = ""
-    last_inference_time = 0
-    inference_interval = 2  # seconds
+    # --- Setup for Asynchronous Inference ---
+    frame_queue = queue.Queue(maxsize=1)
+    inference_thread = threading.Thread(
+        target=inference_worker,
+        args=(frame_queue, model, tokenizer, image_processor, input_ids, args),
+        daemon=True
+    )
+    inference_thread.start()
 
+    # --- Main Processing Loop ---
     while not video_stream_widget.stopped:
         try:
             frame = video_stream_widget.read()
             if frame is not None:
-                current_time = time.time()
-
-                # Perform inference every `inference_interval` seconds
-                if current_time - last_inference_time > inference_interval:
-                    last_inference_time = current_time
-
-                    # 1. Pre-process the Frame for the Model
-                    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    pil_image = Image.fromarray(rgb_frame)
-
-                    # 2. Process image for LLaVA
-                    image_tensor = process_images([pil_image], image_processor, model.config)[0]
-                    # commented by ph - image_tensor = image_tensor.to(model.device, dtype=torch.float16)
-
-                    # 3. Run inference
-                    with torch.inference_mode():
-                        output_ids = model.generate(
-                            input_ids,
-                            images=image_tensor.unsqueeze(0).half(),
-                            image_sizes=[pil_image.size],
-                            do_sample=True if args.temperature > 0 else False,
-                            temperature=args.temperature,
-                            top_p=args.top_p,
-                            num_beams=args.num_beams,
-                            pad_token_id=tokenizer.pad_token_id,
-                            max_new_tokens=256,
-                            use_cache=True)
-
-                        outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
-                        generated_text = outputs
-
-                    # 4. Print description to console if it has changed
-                    if generated_text and generated_text != last_printed_text:
-                        timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-                        print(f"[{timestamp}] {generated_text}\n")
-                        last_printed_text = generated_text
+                # Non-blocking attempt to put the latest frame in the queue.
+                # If the queue is full, it means inference is ongoing, so we
+                # simply drop this frame and continue to display the video.
+                try:
+                    frame_queue.put_nowait(frame)
+                except queue.Full:
+                    pass
 
                 # Display the raw frame without text overlay
                 cv2.imshow("RTSP Stream with LLaVA", frame)
@@ -235,5 +252,7 @@ if __name__ == "__main__":
 
     # --- Cleanup ---
     print("Shutting down...")
+    frame_queue.put(None)  # Send sentinel to stop worker thread
+    inference_thread.join()
     video_stream_widget.stop()
     cv2.destroyAllWindows()
