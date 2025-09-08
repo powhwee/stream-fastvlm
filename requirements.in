@@ -1,0 +1,7 @@
+# Install the project itself in editable mode.
+# This tells pip-compile to read the dependencies directly from pyproject.toml.
+-e .
+
+# Add any extra dependencies needed for the standalone application that are
+# not part of the core project.
+opencv-python
