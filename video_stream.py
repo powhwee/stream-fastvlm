@@ -16,23 +16,71 @@ from llava.constants import IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_S
 
 import cv2
 import threading
+import subprocess as sp
+import numpy as np
 import sys
 # --- Threaded RTSP Video Capture ---
-# This class remains unchanged as its job is to efficiently capture
-# video frames, independent of the AI framework being used.
+# This class uses ffmpeg to capture frames from an RTSP stream, which can be
+# more robust than OpenCV's VideoCapture for certain stream types.
 class RTSPCameraStream:
     def __init__(self, rtsp_url):
         self.rtsp_url = rtsp_url
-        self.capture = cv2.VideoCapture(self.rtsp_url)
-        if not self.capture.isOpened():
-            print(f"Error: Could not open RTSP stream at {rtsp_url}", file=sys.stderr)
+        self.stopped = False
+        self.frame = None
+        self.width = None
+        self.height = None
+        self.ffmpeg_process = None
+        self.thread = None
+
+        # 1. Use ffprobe to get video dimensions
+        try:
+            probe_command = [
+                'ffprobe',
+                '-v', 'error',
+                '-select_streams', 'v:0',
+                '-show_entries', 'stream=width,height',
+                '-of', 'csv=s=x:p=0',
+                self.rtsp_url
+            ]
+            # Using a timeout is crucial for network streams
+            probe_process = sp.Popen(probe_command, stdout=sp.PIPE, stderr=sp.PIPE)
+            out, err = probe_process.communicate(timeout=15)
+            if probe_process.returncode != 0:
+                print(f"Error running ffprobe: {err.decode('utf-8')}", file=sys.stderr)
+                self.stopped = True
+                return
+
+            self.width, self.height = map(int, out.decode('utf-8').strip().split('x'))
+            print(f"Detected stream resolution: {self.width}x{self.height}", file=sys.stderr)
+
+        except FileNotFoundError:
+            print("Error: ffprobe not found. Please ensure ffprobe (from ffmpeg) is installed and in your PATH.", file=sys.stderr)
             self.stopped = True
             return
-            
-        self.stopped = False
-        self.grabbed, self.frame = self.capture.read()
-        if not self.grabbed:
-            print("Error: Could not read initial frame from stream.", file=sys.stderr)
+        except sp.TimeoutExpired:
+            print(f"Error: ffprobe timed out trying to connect to {self.rtsp_url}", file=sys.stderr)
+            self.stopped = True
+            return
+        except Exception as e:
+            print(f"An unexpected error occurred with ffprobe: {e}", file=sys.stderr)
+            self.stopped = True
+            return
+
+        # 2. Set up ffmpeg process to decode video
+        self.command = [
+            'ffmpeg',
+            '-i', self.rtsp_url,
+            '-loglevel', 'quiet',  # To suppress ffmpeg's own console output
+            '-an',                 # No audio
+            '-f', 'rawvideo',      # Output raw video frames
+            '-pix_fmt', 'bgr24',   # Pixel format OpenCV uses
+            '-'                    # Output to stdout
+        ]
+
+        try:
+            self.ffmpeg_process = sp.Popen(self.command, stdout=sp.PIPE, stderr=sp.DEVNULL)
+        except FileNotFoundError:
+            print("Error: ffmpeg not found. Please ensure ffmpeg is installed and in your PATH.", file=sys.stderr)
             self.stopped = True
             return
 
@@ -46,21 +94,45 @@ class RTSPCameraStream:
         return self
 
     def update(self):
+        frame_size = self.width * self.height * 3
         while not self.stopped:
-            self.grabbed, self.frame = self.capture.read()
-            if not self.grabbed:
-                print("Stream ended or could not grab frame. Stopping thread.", file=sys.stderr)
+            try:
+                # Read a full frame's worth of bytes from the ffmpeg stdout pipe
+                in_bytes = self.ffmpeg_process.stdout.read(frame_size)
+                if len(in_bytes) == 0:
+                    print("Stream ended or ffmpeg process closed. Stopping thread.", file=sys.stderr)
+                    self.stopped = True
+                    break
+                
+                if len(in_bytes) != frame_size:
+                    print(f"Warning: Incomplete frame read. Expected {frame_size}, got {len(in_bytes)}. Skipping.", file=sys.stderr)
+                    continue
+
+                # Convert the byte buffer to a numpy array and reshape it to an image
+                self.frame = np.frombuffer(in_bytes, np.uint8).reshape([self.height, self.width, 3])
+            except Exception as e:
+                print(f"Error in RTSP stream update loop: {e}", file=sys.stderr)
                 self.stopped = True
                 break
-        self.capture.release()
+        
+        # Clean up the process when the loop ends
+        if self.ffmpeg_process:
+            if self.ffmpeg_process.poll() is None:
+                self.ffmpeg_process.terminate()
+            self.ffmpeg_process.stdout.close()
+            if self.ffmpeg_process.stderr:
+                self.ffmpeg_process.stderr.close()
+            self.ffmpeg_process.wait()
 
     def read(self):
         return self.frame
 
     def stop(self):
         self.stopped = True
-        if self.thread.is_alive():
-            self.thread.join()
+        if self.ffmpeg_process and self.ffmpeg_process.poll() is None:
+            self.ffmpeg_process.terminate()
+        if self.thread and self.thread.is_alive():
+            self.thread.join(timeout=5) # Wait up to 5 seconds for the thread to finish
 
 
 if __name__ == "__main__":
@@ -69,7 +141,7 @@ if __name__ == "__main__":
     parser.add_argument("--model-base", type=str, default=None)
     parser.add_argument("--rtsp-url", type=str, help="RTSP stream URL.", required=True)
     parser.add_argument("--prompt", type=str, default="Describe the scene in detail.", help="Prompt for VLM.")
-    parser.add_argument("--conv-mode", type=str, default="llava_v1")
+    parser.add_argument("--conv-mode", type=str, default="qwen_2")
     parser.add_argument("--temperature", type=float, default=0.2)
     parser.add_argument("--top_p", type=float, default=None)
     parser.add_argument("--num_beams", type=int, default=1)
@@ -97,6 +169,9 @@ if __name__ == "__main__":
     conv.append_message(conv.roles[1], None)
     prompt = conv.get_prompt()
 
+    # Set the pad token id for generation
+    model.generation_config.pad_token_id = tokenizer.pad_token_id
+    
     input_ids = tokenizer_image_token(prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors='pt').unsqueeze(0).to(torch.device("mps"))
 
     # --- Main Processing Loop ---
@@ -112,14 +187,14 @@ if __name__ == "__main__":
                 pil_image = Image.fromarray(rgb_frame)
 
                 # 2. Process image for LLaVA
-                image_tensor = process_images([pil_image], image_processor, model.config)
-                image_tensor = image_tensor.to(model.device, dtype=torch.float16)
+                image_tensor = process_images([pil_image], image_processor, model.config)[0]
+                # commented by ph - image_tensor = image_tensor.to(model.device, dtype=torch.float16)
 
                 # 3. Run inference
                 with torch.inference_mode():
                     output_ids = model.generate(
                         input_ids,
-                        images=image_tensor,
+                        images=image_tensor.unsqueeze(0).half(),
                         image_sizes=[pil_image.size],
                         do_sample=True if args.temperature > 0 else False,
                         temperature=args.temperature,
