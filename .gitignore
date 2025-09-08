@@ -5,3 +5,7 @@ venv/
 env/
 .idea/
 *.DS_Store
+*.mov
+*.jpg
+*.png
+

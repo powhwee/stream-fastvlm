@@ -22,71 +22,17 @@ import sys
 import queue
 import time
 # --- Threaded RTSP Video Capture ---
-# This class uses ffmpeg to capture frames from an RTSP stream, which can be
-# more robust than OpenCV's VideoCapture for certain stream types.
+# This class reads raw video frames from stdin, which is expected to be piped
+# from an ffmpeg process.
 class RTSPCameraStream:
-    def __init__(self, rtsp_url):
-        self.rtsp_url = rtsp_url
+    def __init__(self, width, height):
+        self.width = width
+        self.height = height
         self.stopped = False
         self.frame = None
-        self.width = None
-        self.height = None
-        self.ffmpeg_process = None
         self.thread = None
 
-        # 1. Use ffprobe to get video dimensions
-        try:
-            probe_command = [
-                'ffprobe',
-                '-v', 'error',
-                '-select_streams', 'v:0',
-                '-show_entries', 'stream=width,height',
-                '-of', 'csv=s=x:p=0',
-                self.rtsp_url
-            ]
-            # Using a timeout is crucial for network streams
-            probe_process = sp.Popen(probe_command, stdout=sp.PIPE, stderr=sp.PIPE)
-            out, err = probe_process.communicate(timeout=15)
-            if probe_process.returncode != 0:
-                print(f"Error running ffprobe: {err.decode('utf-8')}", file=sys.stderr)
-                self.stopped = True
-                return
-
-            self.width, self.height = map(int, out.decode('utf-8').strip().split('x'))
-            print(f"Detected stream resolution: {self.width}x{self.height}", file=sys.stderr)
-
-        except FileNotFoundError:
-            print("Error: ffprobe not found. Please ensure ffprobe (from ffmpeg) is installed and in your PATH.", file=sys.stderr)
-            self.stopped = True
-            return
-        except sp.TimeoutExpired:
-            print(f"Error: ffprobe timed out trying to connect to {self.rtsp_url}", file=sys.stderr)
-            self.stopped = True
-            return
-        except Exception as e:
-            print(f"An unexpected error occurred with ffprobe: {e}", file=sys.stderr)
-            self.stopped = True
-            return
-
-        # 2. Set up ffmpeg process to decode video
-        self.command = [
-            'ffmpeg',
-            '-i', self.rtsp_url,
-            '-loglevel', 'quiet',  # To suppress ffmpeg's own console output
-            '-an',                 # No audio
-            '-f', 'rawvideo',      # Output raw video frames
-            '-pix_fmt', 'bgr24',   # Pixel format OpenCV uses
-            '-'                    # Output to stdout
-        ]
-
-        try:
-            self.ffmpeg_process = sp.Popen(self.command, stdout=sp.PIPE, stderr=sp.DEVNULL)
-        except FileNotFoundError:
-            print("Error: ffmpeg not found. Please ensure ffmpeg is installed and in your PATH.", file=sys.stderr)
-            self.stopped = True
-            return
-
-        # Start the thread to read frames from the video stream
+        # Start the thread to read frames from stdin
         self.thread = threading.Thread(target=self.update, args=())
         self.thread.daemon = True
 
@@ -99,10 +45,10 @@ class RTSPCameraStream:
         frame_size = self.width * self.height * 3
         while not self.stopped:
             try:
-                # Read a full frame's worth of bytes from the ffmpeg stdout pipe
-                in_bytes = self.ffmpeg_process.stdout.read(frame_size)
+                # Read a full frame's worth of bytes from stdin
+                in_bytes = sys.stdin.buffer.read(frame_size)
                 if len(in_bytes) == 0:
-                    print("Stream ended or ffmpeg process closed. Stopping thread.", file=sys.stderr)
+                    print("Input stream ended. Stopping thread.", file=sys.stderr)
                     self.stopped = True
                     break
                 
@@ -113,28 +59,17 @@ class RTSPCameraStream:
                 # Convert the byte buffer to a numpy array and reshape it to an image
                 self.frame = np.frombuffer(in_bytes, np.uint8).reshape([self.height, self.width, 3])
             except Exception as e:
-                print(f"Error in RTSP stream update loop: {e}", file=sys.stderr)
+                print(f"Error in stdin stream update loop: {e}", file=sys.stderr)
                 self.stopped = True
                 break
-        
-        # Clean up the process when the loop ends
-        if self.ffmpeg_process:
-            if self.ffmpeg_process.poll() is None:
-                self.ffmpeg_process.terminate()
-            self.ffmpeg_process.stdout.close()
-            if self.ffmpeg_process.stderr:
-                self.ffmpeg_process.stderr.close()
-            self.ffmpeg_process.wait()
 
     def read(self):
         return self.frame
 
     def stop(self):
         self.stopped = True
-        if self.ffmpeg_process and self.ffmpeg_process.poll() is None:
-            self.ffmpeg_process.terminate()
         if self.thread and self.thread.is_alive():
-            self.thread.join(timeout=5) # Wait up to 5 seconds for the thread to finish
+            self.thread.join(timeout=1) # Wait up to 1 second for the thread to finish
 
 
 def inference_worker(q, model, tokenizer, image_processor, input_ids, args):
@@ -179,10 +114,17 @@ def inference_worker(q, model, tokenizer, image_processor, input_ids, args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="Process a video stream from stdin with a VLM. "
+                    "Example usage:\n"
+                    "ffmpeg -i <rtsp_url> -f rawvideo -pix_fmt bgr24 - "
+                    "| python video_stream.py --width 1280 --height 720 --model-path ...",
+        formatter_class=argparse.RawTextHelpFormatter
+    )
     parser.add_argument("--model-path", type=str, default="./llava-v1.5-13b")
     parser.add_argument("--model-base", type=str, default=None)
-    parser.add_argument("--rtsp-url", type=str, help="RTSP stream URL.", required=True)
+    parser.add_argument("--width", type=int, help="Width of the video stream from stdin.", required=True)
+    parser.add_argument("--height", type=int, help="Height of the video stream from stdin.", required=True)
     parser.add_argument("--prompt", type=str, default="Describe the scene in detail.", help="Prompt for VLM.")
     parser.add_argument("--conv-mode", type=str, default="qwen_2")
     parser.add_argument("--temperature", type=float, default=0.2)
@@ -197,7 +139,7 @@ if __name__ == "__main__":
     tokenizer, model, image_processor, context_len = load_pretrained_model(model_path, args.model_base, model_name, device="mps")
 
     # --- Video Stream Setup ---
-    video_stream_widget = RTSPCameraStream(args.rtsp_url)
+    video_stream_widget = RTSPCameraStream(width=args.width, height=args.height)
     video_stream_widget.start()
 
     # --- Prompt Setup ---
