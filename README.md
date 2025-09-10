@@ -10,21 +10,32 @@ This project uses ffmpeg to pipe video, images, including video streams to FastV
 -   Python 3.10
 -   FFmpeg
 
+Note: Python 3.13 didn't work when I tested it.  
+
 ## Setup
 
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/your-username/stream-fastvlm.git
-    cd stream-fastvlm
-    ```
-
-2.  **Create and activate a virtual environment:**
+1.  **Create and activate a virtual environment:**
     ```bash
     python3 -m venv venv
     source venv/bin/activate
     ```
+    
+
+2.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/powhwee/stream-fastvlm.git
+    cd stream-fastvlm
+    ```
+
 
 3.  **Download Model Weights:**
+    ```bash
+    # Assuming you are in the stream-fastvlm directory, chmod u+x this .sh file and run it to download Apple's 0.5b model file.  There are model with 1.5b and 7b parameters but this script downloads only the 0.5b model
+    cd checkpoints  
+    chmod u+x get_0.5b_model.sh  
+    ./get_0.5b_model.sh
+    ```
+    
     Download FastVLM's model and place it in a known directory. The example command below points to local folders (e.g., `./checkpoints/llava-fastvithd_0.5b_stage3`), so adjust the path as needed.
 
 ## Usage
@@ -37,33 +48,43 @@ This project uses ffmpeg to pipe video, images, including video streams to FastV
     ```bash
     ffmpeg -i "rtsp://<YOUR_RTSP_URL>" -f rawvideo -pix_fmt bgr24 - \
     | python video_stream.py --width <STREAM_WIDTH> --height <STREAM_HEIGHT> --model-path <PATH_TO_YOUR_MODEL>
+
+    # RTSP_URL typically looks like this : rtsp://<id>:<your_password>@<ip address>:554/<streamId>
     ```
 
 ### Example
 
 Here is a complete example using a hypothetical RTSP URL and a 1280x720 resolution stream:
 
-```bash
-ffmpeg -i "rtsp://<id>:<your_password>@<ip address>:554/<streamId>" -f rawvideo -pix_fmt bgr24 - \
-| python video_stream.py --width 1280 --height 720 --model-path ./checkpoints/llava-fastvithd_0.5b_stage3 --prompt "Describe this scene."
-```
+`bash
+ffmpeg -i "rtsp://<YOUR_RTSP_URL>/<streamId>" -f rawvideo -pix_fmt bgr24 - \
+| python video_stream.py --width 1280 --height 720 --model-path ./checkpoints/llava-fastvithd_0.5b_stage3 --prompt "Describe this scene."`
+
 
 The script will open a window displaying the video feed, and you will see timestamped descriptions appearing in your console. Press `q` with the video window in focus to quit.
 
-This is another example that describes an image:
-
-```bash
-ffmpeg -i "rtsp://<id>:<your_password>@<ip address>:554/<streamId>" -f rawvideo -pix_fmt bgr24 - \
-| python video_stream.py --width 1280 --height 720 --model-path ./checkpoints/llava-fastvithd_0.5b_stage3 --prompt "Describe this scene."
-```
-
-Test image
+#### Test video
 
 <img src="test_data/test_image_chicken_cross_the_road.png" width="640" height="auto" />
 
+ For ease of verifying your setup before you get to RTSP, I used the following test video.  Note the prompt I gave it to give the model a bit of challenge to find out what is unique.
+
+```bash
+ffmpeg -re -i "test_data/test_video_chicken_cross_the_road.mov" -f rawvideo -pix_fmt bgr24 - | python video_stream.py --width 1280 --height 1064 --prompt "Describe what is unique about this scene" --model-path ./checkpoints/llava-fastvithd_0.5b_stage3
+```
+
+These are the outputs:
+```
+[2025-09-10 20:57:38] The scene is unique because it captures a moment where a rooster is seen in the foreground, seemingly walking across a pedestrian crossing, while a car is in motion in the background. The combination of the rooster and the car creates a striking contrast between the natural and the man-made elements in the image. The rooster's vibrant colors and the motion blur of the car add a dynamic quality to the scene, suggesting a moment of unexpected interaction between the two.
+
+[2025-09-10 20:57:41] The scene is unique due to the presence of a rooster walking across the street, which is not a common sight in many urban areas. The rooster's vibrant red color contrasts sharply with the muted tones of the surrounding buildings and the grey sky. Additionally, the street is lined with parked cars and a few pedestrians, suggesting a typical day in a bustling city. The juxtaposition of the rooster against the backdrop of modern buildings and the urban environment creates a striking image that captures the essence of city life.
+
+[2025-09-10 20:57:42] This scene is unique because it features a chicken walking across a city street, which is an unusual sight in an urban environment. The presence of the chicken amidst the traffic and buildings is unexpected and adds a whimsical element to the otherwise typical cityscape.
+```
+
 
 ### Command-Line Arguments
-
+python video_stream.py 
 -   `--model-path`: (Required) Path to the VLM checkpoint.
 -   `--width`: (Required) Width of the input video stream.
 -   `--height`: (Required) Height of the input video stream.
