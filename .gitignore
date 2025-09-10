@@ -7,7 +7,6 @@ llava/
 llava.egg-info/
 .idea/
 *.DS_Store
-*.mov
 *.jpg
 *.png
 
