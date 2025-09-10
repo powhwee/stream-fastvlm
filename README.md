@@ -2,7 +2,7 @@
 
 Apple's FastVLM repository comes with a demo predict.py that works with an image, and also iOS/MacOS apps to demo its features.
 
-This project uses ffmpeg to pipe video, images, including video streams to FastVLM for interpretation.
+This project uses ffmpeg to pipe video, images, including video streams to FastVLM for interpretation.  The output is then logged with timestamp. This is still exploratory with the view that logs can be more easily searched analysed.  Combining FastVLM with an LLM also allow filtering out unique scenes, as illustrated in the example below.
 
 
 ## Prerequisites
