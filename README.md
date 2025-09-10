@@ -50,6 +50,18 @@ ffmpeg -i "rtsp://<id>:<your_password>@<ip address>:554/<streamId>" -f rawvideo 
 
 The script will open a window displaying the video feed, and you will see timestamped descriptions appearing in your console. Press `q` with the video window in focus to quit.
 
+This is another example that describes an image:
+
+```bash
+ffmpeg -i "rtsp://<id>:<your_password>@<ip address>:554/<streamId>" -f rawvideo -pix_fmt bgr24 - \
+| python video_stream.py --width 1280 --height 720 --model-path ./checkpoints/llava-fastvithd_0.5b_stage3 --prompt "Describe this scene."
+```
+
+Test image
+
+<img src="test_data/test_image_chicken_cross_the_road.png" width="640" height="auto" />
+
+
 ### Command-Line Arguments
 
 -   `--model-path`: (Required) Path to the VLM checkpoint.
