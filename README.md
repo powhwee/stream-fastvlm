@@ -69,18 +69,18 @@ The script will open a window displaying the video feed, and you will see timest
 
  For ease of verifying your setup before you get to RTSP, I used the following test video.  Note the prompt I gave it to give the model a bit of challenge to find out what is unique.
 
-```bash
+`bash
 ffmpeg -re -i "test_data/test_video_chicken_cross_the_road.mov" -f rawvideo -pix_fmt bgr24 - | python video_stream.py --width 1280 --height 1064 --prompt "Describe what is unique about this scene" --model-path ./checkpoints/llava-fastvithd_0.5b_stage3
-```
+
 
 These are the outputs:
-```bash
+`bash
 [2025-09-10 20:57:38] The scene is unique because it captures a moment where a rooster is seen in the foreground, seemingly walking across a pedestrian crossing, while a car is in motion in the background. The combination of the rooster and the car creates a striking contrast between the natural and the man-made elements in the image. The rooster's vibrant colors and the motion blur of the car add a dynamic quality to the scene, suggesting a moment of unexpected interaction between the two.
-
+`bash
 [2025-09-10 20:57:41] The scene is unique due to the presence of a rooster walking across the street, which is not a common sight in many urban areas. The rooster's vibrant red color contrasts sharply with the muted tones of the surrounding buildings and the grey sky. Additionally, the street is lined with parked cars and a few pedestrians, suggesting a typical day in a bustling city. The juxtaposition of the rooster against the backdrop of modern buildings and the urban environment creates a striking image that captures the essence of city life.
-
+`bash
 [2025-09-10 20:57:42] This scene is unique because it features a chicken walking across a city street, which is an unusual sight in an urban environment. The presence of the chicken amidst the traffic and buildings is unexpected and adds a whimsical element to the otherwise typical cityscape.
-```
+
 
 
 ### Command-Line Arguments
