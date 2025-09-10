@@ -5,6 +5,7 @@ venv/
 env/
 llava/
 llava.egg-info/
+checkpoints/llava-fastvithd_0.5b_stage3/
 .idea/
 *.DS_Store
 
