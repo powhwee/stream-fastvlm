@@ -12,7 +12,7 @@ Combining FastVLM with an LLM also allow filtering out unique scenes, as illustr
 -   Python 3.10
 -   FFmpeg
 
-Note: Python 3.13 didn't work when I tested it.  
+Note: Python 3.13 didn't work when I tested it.  This was only developed and tested on an apple silicon mac.
 
 ## Setup
 
