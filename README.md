@@ -1,4 +1,4 @@
-# Stream-VLM: Stream video to Apple's FastVLM using ffmpeg for captioning / descriptions
+# Stream-VLM: Stream video to Apple's FastVLM using ffmpeg for timestamped text description logging
 
 Apple's FastVLM repository (https://github.com/apple/ml-fastvlm) comes with a demo predict.py that works with an image, and also iOS/MacOS apps to demo its features.
 
