@@ -4,8 +4,6 @@ Apple's FastVLM repository (https://github.com/apple/ml-fastvlm) comes with a de
 
 This project uses ffmpeg to pipe video, images, including video streams to FastVLM for interpretation without using the 'predict.py' or the Swift apps.  The output is then logged with timestamp. This is with the view that logs can be more easily searched, analysed and perhaps even summarised by text LLM.  
 
-Combining FastVLM with an LLM also allow filtering out unique scenes, as illustrated in the example below.
-
 
 ## Prerequisites
 
