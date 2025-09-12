@@ -98,7 +98,4 @@ These are the outputs, which is interesting that the VLM is able to identify the
 -   `--conv-mode`: The conversation template to use (e.g., `qwen_2`, `llava_v1`). Default: `"qwen_2"`.
 -   `--temperature`, `--top_p`, `--num_beams`: Standard model generation parameters.
 
-## Acknowledgements
-
-This project utilizes components and concepts from the LLaVA (Large Language and Vision Assistant) project. Please refer to their repository for details on their license and original work.
 
