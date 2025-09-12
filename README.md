@@ -1,8 +1,10 @@
 # Stream-VLM: Stream video to Apple's FastVLM using ffmpeg for captioning / descriptions
 
-Apple's FastVLM repository comes with a demo predict.py that works with an image, and also iOS/MacOS apps to demo its features.
+Apple's FastVLM repository (https://github.com/apple/ml-fastvlm) comes with a demo predict.py that works with an image, and also iOS/MacOS apps to demo its features.
 
-This project uses ffmpeg to pipe video, images, including video streams to FastVLM for interpretation.  The output is then logged with timestamp. This is still exploratory with the view that logs can be more easily searched analysed.  Combining FastVLM with an LLM also allow filtering out unique scenes, as illustrated in the example below.
+This project uses ffmpeg to pipe video, images, including video streams to FastVLM for interpretation without using the 'predict.py' or the Swift apps.  The output is then logged with timestamp. This is with the view that logs can be more easily searched, analysed and perhaps even summarised by text LLM.  
+
+Combining FastVLM with an LLM also allow filtering out unique scenes, as illustrated in the example below.
 
 
 ## Prerequisites
@@ -16,7 +18,8 @@ Note: Python 3.13 didn't work when I tested it.
 
 1.  **Create and activate a virtual environment:**
     ```bash
-    python3 -m venv venv
+    python3.10 -m venv venv
+    # if you have multiple python versions on your machine, use the one that works for FastVLM to create the venv
     source venv/bin/activate
     ```
     
@@ -25,6 +28,8 @@ Note: Python 3.13 didn't work when I tested it.
     ```bash
     git clone https://github.com/powhwee/stream-fastvlm.git
     cd stream-fastvlm
+    pip install -r requirements.txt
+    # the requirements.txt is built from requirement.in, which does an include of the .toml file that comes with Apple's FastVLM
     ```
 
 
@@ -49,31 +54,32 @@ Note: Python 3.13 didn't work when I tested it.
     ffmpeg -i "rtsp://<YOUR_RTSP_URL>" -f rawvideo -pix_fmt bgr24 - \
     | python video_stream.py --width <STREAM_WIDTH> --height <STREAM_HEIGHT> --model-path <PATH_TO_YOUR_MODEL>
 
-    # RTSP_URL typically looks like this : rtsp://<id>:<your_password>@<ip address>:554/<streamId>
-    ```
+    # RTSP_URL typically looks like this : rtsp://<id>:<your_password>@<ip address>:554/<streamId>```
 
 ### Example
 
-Here is a complete example using a hypothetical RTSP URL and a 1280x720 resolution stream:
+Example of using a RTSP URL and a 1280x720 resolution stream:
 
-`bash
-ffmpeg -i "rtsp://<YOUR_RTSP_URL>/<streamId>" -f rawvideo -pix_fmt bgr24 - \
-| python video_stream.py --width 1280 --height 720 --model-path ./checkpoints/llava-fastvithd_0.5b_stage3 --prompt "Describe this scene."`
+```bash
+ffmpeg -i "rtsp://rtspsourcename:credential@192.168.1.20/stream2" -f rawvideo -pix_fmt bgr24 - \
+| python video_stream.py --width 1280 --height 720 --model-path ./checkpoints/llava-fastvithd_0.5b_stage3 --prompt "Describe this scene."
+```
 
 
 The script will open a window displaying the video feed, and you will see timestamped descriptions appearing in your console. Press `q` with the video window in focus to quit.
 
 #### Test video
 
+For ease of verifying your setup before you get to RTSP, I used the following test video.  Note the prompt I use to give the model a bit of challenge to find out what is unique.
+
+```bash
+ffmpeg -re -i "test_data/test_video_chicken_cross_the_road.mov" -f rawvideo -pix_fmt bgr24 - | python video_stream.py --width 1280 --height 1064 --prompt "Describe what is unique about this scene" --model-path ./checkpoints/llava-fastvithd_0.5b_stage3
+```
+
 <img src="test_data/test_image_chicken_cross_the_road.png" width="640" height="auto" />
 
- For ease of verifying your setup before you get to RTSP, I used the following test video.  Note the prompt I gave it to give the model a bit of challenge to find out what is unique.
 
-`bash
-ffmpeg -re -i "test_data/test_video_chicken_cross_the_road.mov" -f rawvideo -pix_fmt bgr24 - | python video_stream.py --width 1280 --height 1064 --prompt "Describe what is unique about this scene" --model-path ./checkpoints/llava-fastvithd_0.5b_stage3`
-
-
-These are the outputs:
+These are the outputs, which is interesting that the VLM is able to identify the uniqueness of the scene:
 
 `[2025-09-10 20:57:38] The scene is unique because it captures a moment where a rooster is seen in the foreground, seemingly walking across a pedestrian crossing, while a car is in motion in the background. The combination of the rooster and the car creates a striking contrast between the natural and the man-made elements in the image. The rooster's vibrant colors and the motion blur of the car add a dynamic quality to the scene, suggesting a moment of unexpected interaction between the two.`
 
@@ -84,7 +90,7 @@ These are the outputs:
 
 
 ### Command-Line Arguments
-python video_stream.py 
+`python video_stream.py`
 -   `--model-path`: (Required) Path to the VLM checkpoint.
 -   `--width`: (Required) Width of the input video stream.
 -   `--height`: (Required) Height of the input video stream.
